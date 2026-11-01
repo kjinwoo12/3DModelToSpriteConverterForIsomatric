@@ -1,0 +1,9 @@
+# 중간 결과
+work/
+__pycache__/
+*.pyc
+
+# Mixamo에서 받은 FBX는 Adobe 약관상 재배포 불가. 원본 모델(.vrm, 유료 팩)도 커밋하지 말 것
+*.fbx
+*.vrm
+*.blend1
