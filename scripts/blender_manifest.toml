@@ -1,0 +1,19 @@
+schema_version = "1.0.0"
+
+id = "iso_sprite_converter"
+version = "1.0.0"
+name = "Isometric 8-Direction Sprite Converter"
+tagline = "Bake 3D characters into isometric 8-direction pixel sprites"
+maintainer = "kjinwoo12"
+type = "add-on"
+website = "https://github.com/kjinwoo12/3DModelToSpriteConverterForIsomatric"
+tags = ["Render", "Animation", "Import-Export"]
+
+blender_version_min = "4.2.0"
+license = ["SPDX:MIT"]
+
+[permissions]
+files = "Read models and write rendered frames and sprite sheets"
+
+[build]
+paths_exclude_pattern = ["__pycache__/", "/.git/", "*.zip"]

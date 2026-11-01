@@ -2,6 +2,8 @@
 #
 #   blender -b -P scripts/render8.py -- --out work/hero_frames --clips-dir models/hero/anims
 #   blender -b -P scripts/render8.py -- --out work/hero_frames --clip idle=idle.fbx --clip run=run.fbx --res 192
+#   blender -b -P scripts/render8.py -- --out work/rogue_frames --clip "idle=Rogue.fbx#Idle" --clip "run=Rogue.fbx#Running_A"
+#   blender -b -P scripts/render8.py -- --list-actions Rogue.fbx      (FBX 안의 동작 목록)
 #
 # 출력: {out}/{동작}_{방향}_{번호}.png (방향 S,SW,W,NW,N,NE,E,SE) + {out}/meta.json
 # 이어서 pixelize.py로 도트 시트를 만든다. 자세한 사용법은 저장소 README.md.
@@ -19,8 +21,9 @@ DIRS = ['S', 'SW', 'W', 'NW', 'N', 'NE', 'E', 'SE']
 def parse():
     argv = sys.argv[sys.argv.index('--') + 1:] if '--' in sys.argv else []
     p = argparse.ArgumentParser(prog='render8.py', description='애니메이션 FBX → 8방향 PNG 프레임')
-    p.add_argument('--out', required=True, help='프레임 PNG를 쓸 폴더')
-    p.add_argument('--clip', action='append', default=[], metavar='NAME=FILE.fbx', help='동작 이름=FBX 경로 (여러 번)')
+    p.add_argument('--out', help='프레임 PNG를 쓸 폴더')
+    p.add_argument('--clip', action='append', default=[], metavar='NAME=FILE.fbx[#ACTION]',
+                   help='동작 이름=FBX 경로 (여러 번). 동작이 여러 개 든 FBX는 #액션이름으로 고름 (예: idle=Rogue.fbx#Idle)')
     p.add_argument('--clips-dir', help='이 폴더의 *.fbx 전부. 동작 이름 = 파일 이름(소문자, 공백→_)')
     p.add_argument('--res', type=int, default=192, help='렌더 크기(px, 정사각). 칸 크기의 2배 권장 (기본 192)')
     p.add_argument('--step', type=int, default=1, help='몇 프레임마다 찍을지. 30fps 원본을 10fps로 = 3 (기본 1)')
@@ -36,14 +39,21 @@ def parse():
     p.add_argument('--lockz', default='', help='높이 이동도 없앨 동작 이름, 쉼표 구분 (예: climb,wallrun)')
     p.add_argument('--root-bone', default='', help='제자리 고정 기준 뼈. 기본: 이름이 Hips로 끝나는 뼈')
     p.add_argument('--keep-root-motion', action='store_true', help='제자리 고정을 하지 않음')
+    p.add_argument('--hide', action='append', default=[], metavar='PREFIX', help='이름이 PREFIX로 시작하는 오브젝트를 렌더에서 숨김 (여러 번, 예: 무기)')
     p.add_argument('--gpu', action='store_true', help='Cycles를 GPU로 렌더')
+    p.add_argument('--preview', metavar='FILE.png', help='첫 동작의 첫 프레임을 S방향으로 한 장만 찍어 이 경로에 저장 (값 맞추기용)')
+    p.add_argument('--list-actions', metavar='FILE.fbx', help='FBX 안의 동작 목록만 출력하고 끝냄')
     a = p.parse_args(argv)
+    if a.list_actions:
+        return a
     clips = [c.split('=', 1) for c in a.clip]
     if a.clips_dir:
         for f in sorted(glob.glob(os.path.join(a.clips_dir, '*.fbx'))):
             clips.append((os.path.splitext(os.path.basename(f))[0].lower().replace(' ', '_'), f))
     if not clips:
         p.error('--clip 또는 --clips-dir가 필요합니다')
+    if not a.out and not a.preview:
+        p.error('--out이 필요합니다')
     a.clips = clips
     a.lockz = {s for s in a.lockz.split(',') if s}
     a.rim_color = tuple(float(x) for x in a.rim_color.split(','))
@@ -71,13 +81,40 @@ def fix_alpha():
 def find_root(arm, name):
     if name:
         return arm.pose.bones[name]
-    return next((pb for pb in arm.pose.bones if pb.name.split(':')[-1].endswith('Hips')),
+    return next((pb for pb in arm.pose.bones if pb.name.split(':')[-1].lower().endswith('hips')),
                 next(pb for pb in arm.pose.bones if pb.parent is None))
 
 
-def render_clip(a, name, fbx):
+def action_name(act):
+    return act.name.split('|')[-1]  # FBX 임포트는 '아마추어|동작' 이름을 붙임
+
+
+def set_action(arm, want):
+    act = next((x for x in bpy.data.actions if x.name == want or action_name(x) == want), None)
+    if act is None:
+        raise SystemExit(f'동작 "{want}"이 없습니다. 있는 것: {", ".join(action_name(x) for x in bpy.data.actions)}')
+    ad = arm.animation_data or arm.animation_data_create()
+    ad.action = act
+    if hasattr(ad, 'action_slot') and ad.action_slot is None and len(act.slots):  # 4.4+ 슬롯 액션
+        ad.action_slot = act.slots[0]
+
+
+def list_actions(fbx):
     bpy.ops.wm.read_factory_settings(use_empty=True)
     bpy.ops.import_scene.fbx(filepath=os.path.abspath(fbx))
+    for act in bpy.data.actions:
+        f0, f1 = map(int, act.frame_range)
+        print(f'ACTION {action_name(act)}	{f0}	{f1}', flush=True)
+
+
+def render_clip(a, name, fbx, preview=None):
+    fbx, want = fbx.rsplit('#', 1) if '#' in fbx else (fbx, '')
+    bpy.ops.wm.read_factory_settings(use_empty=True)
+    bpy.ops.import_scene.fbx(filepath=os.path.abspath(fbx))
+    bpy.ops.file.find_missing_files(directory=os.path.dirname(os.path.abspath(fbx)))  # 텍스처 경로가 다른 PC 기준일 때
+    for o in bpy.data.objects:
+        if a.hide and o.name.startswith(tuple(a.hide)):
+            o.hide_render = True
     fix_alpha()
     shading.apply(emission=a.emission, flat_prefixes=a.flat_prefix)
     sc = bpy.context.scene
@@ -90,6 +127,8 @@ def render_clip(a, name, fbx):
     shading.add_rim(a.rim, a.rim_color)
 
     arm = next((o for o in bpy.data.objects if o.type == 'ARMATURE'), None)
+    if want and arm:
+        set_action(arm, want)
     act = arm.animation_data.action if arm and arm.animation_data else None
     f0, f1 = map(int, act.frame_range) if act else (1, 1)
 
@@ -116,19 +155,32 @@ def render_clip(a, name, fbx):
     cam.location = target + Vector((0, -20 * math.cos(el), 20 * math.sin(el)))
     cam.rotation_euler = (math.radians(90) - el, 0, 0)
 
+    if preview:
+        pivot.rotation_euler[2] = math.radians(a.face)
+        sc.frame_set(f0); sc.render.filepath = os.path.abspath(preview)
+        bpy.ops.render.render(write_still=True)
+        print('PREVIEW', preview, flush=True)
+        return None
+
     frames = list(range(f0, f1 + 1, a.step))
+    total = len(DIRS) * len(frames)
     for di, d in enumerate(DIRS):
         pivot.rotation_euler[2] = math.radians(a.face - 45 * di)
         for fi, f in enumerate(frames):
             sc.frame_set(f)
             sc.render.filepath = os.path.join(os.path.abspath(a.out), f'{name}_{d}_{fi:02d}.png')
             bpy.ops.render.render(write_still=True)
+            print(f'PROGRESS {name} {di * len(frames) + fi + 1}/{total}', flush=True)
     print('CLIP', name, len(frames), flush=True)
     return {'frames': len(frames), 'step': a.step, 'source_fps': sc.render.fps}
 
 
 def main():
     a = parse()
+    if a.list_actions:
+        return list_actions(a.list_actions)
+    if a.preview:
+        return render_clip(a, *a.clips[0], preview=a.preview)
     os.makedirs(a.out, exist_ok=True)
     meta_path = os.path.join(a.out, 'meta.json')
     meta = json.load(open(meta_path, encoding='utf-8')) if os.path.exists(meta_path) else {}
