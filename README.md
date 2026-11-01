@@ -42,6 +42,8 @@ pixelize만 일반 Python으로 돌리려면 `pip install -r requirements.txt`(n
 
 ## 애드온 사용법
 
+![Sprite8 패널](docs/sprite8_panel.png)
+
 패널은 단계 순서대로 세 칸입니다. 각 단계는 백그라운드 Blender에서 돌기 때문에 지금 연 씬은 바뀌지 않고, 렌더 중에도 Blender를 쓸 수 있습니다. 진행률과 **취소** 버튼은 패널 맨 위에 나옵니다. 실패하면 마지막 오류 줄이 패널에 뜨고, 전체 로그는 **Window > Toggle System Console**에서 봅니다.
 
 **1. Mixamo 업로드용 FBX** (이미 리깅된 FBX가 있으면 건너뜀)
